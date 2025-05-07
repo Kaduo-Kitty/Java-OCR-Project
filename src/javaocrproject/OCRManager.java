@@ -24,7 +24,7 @@ public class OCRManager {
             default:
                 return "错误：未知识别引擎 \"" + engineName + "\"";
         }
-
+        
         return ocr.recognize(imagePath);
     }
 }

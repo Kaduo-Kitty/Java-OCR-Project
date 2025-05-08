@@ -82,7 +82,7 @@ public class OCRGui extends JFrame {
 
         // 暂时使用 MockOCR 进行测试
         OCRLibrary ocr = new MockOCR();
-        String result = ocr.recognize(imagePath);
+        String result = OCRManager.recognize(imagePath, "tesseract");
         resultArea.setText(result);
     }
 

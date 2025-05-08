@@ -9,5 +9,7 @@ package javaocrproject;
  * @author Xiang
  */
 public class MainApp {
-    
+    public static void main(String[] args) {
+        OCRGui.main(args);
+    }
 }

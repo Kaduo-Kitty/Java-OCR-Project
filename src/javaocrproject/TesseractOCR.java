@@ -12,19 +12,25 @@ import java.io.File;
  * @author Xiang
  */
 public class TesseractOCR implements OCRLibrary {
+    
+    
+    @Override
     public String recognize(String imagePath) {
         File imageFile = new File(imagePath);
         ITesseract tesseract = new Tesseract();
-
-        // 设置语言包路径（可按实际修改）
-        tesseract.setDatapath("tessdata"); // tessdata 文件夹放在项目根目录
+        tesseract.setDatapath("tessdata");
         tesseract.setLanguage("eng");
-
         try {
             return tesseract.doOCR(imageFile);
-        } 
-        catch (TesseractException e) {
+        } catch (TesseractException e) {
             return "识别失败：" + e.getMessage();
         }
     }
+    
+    public static void main(String[] args) {//快速测试
+        String img = "C:\\Users\\lovex\\Pictures\\Screenshots";  // 换成真实图片路径
+        String out = new TesseractOCR().recognize(img);
+        System.out.println("识别结果：\n" + out);
+    }
+    
 }

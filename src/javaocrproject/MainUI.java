@@ -1,235 +1,250 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package javaocrproject;
 
+import net.sourceforge.tess4j.Tesseract;
 import net.sourceforge.tess4j.TesseractException;
-
 import javax.imageio.ImageIO;
 import javax.swing.*;
-import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.dnd.*;
-import java.awt.event.*;
+import java.awt.event.ItemEvent;
 import java.awt.image.BufferedImage;
-import java.io.*;
-import java.util.List;
+import java.io.File;
+import java.util.Locale;
+
 /**
- *
- * @author Xiang
- *  
- * 本类负责搭建整个 Swing 界面，并处理用户交互事件。
- * 界面分为左右两部分：
- *   - 左侧预览区：用户拖拽图片到此，显示缩略并自动执行 OCR
- *   - 右侧选项区：包含 "设置" 和 "输出" 两个标签页
- *     - "设置" 页：切换界面语言、OCR 语言、OCR 引擎
- *     - "输出" 页：显示 OCR 结果，并提供导出为 TXT 的功能
- * 
- * 业务逻辑通过以下几个类拆分：
- *   Settings       - 存储用户偏好（uiLocale, ocrLang, ocrEngine）
- *   LanguageManager- 管理国际化资源，根据 locale 加载 i18n.messages
- *   OCRService     - 封装 Tess4J 调用，执行 OCR
- *   MainUI         - 负责界面及事件，委托以上类执行具体操作
- * 
+ * 主界面类，用于构建 OCR 应用的 Swing 图形界面。
+ * 功能包括图像拖拽识别、语言与引擎设置、多语言界面支持。
  */
 public class MainUI extends JFrame {
-    private final Settings settings;
-    private final LanguageManager langMgr;
-    private final OCRService ocrService;
-    
-    // ------------------- Swing 组件 -------------------
-    private JPanel previewPanel;             // 左侧拖拽/预览面板
-    private JLabel previewLabel;             // 预览面板中显示图片或提示文本
-    private JLabel lblUILang;                // 设置页：界面语言标签
-    private JComboBox<String> uiLangCombo;   // 设置页：界面语言下拉框
-    private JLabel lblOCRLang;               // 设置页：OCR 语言标签
-    private JComboBox<String> ocrLangCombo;  // 设置页：OCR 语言下拉框
-    private JLabel lblOCREngine;             // 设置页：OCR 引擎标签
-    private JComboBox<String> engineCombo;   // 设置页：OCR 引擎下拉框
-    private JTabbedPane tabPane;             // 右侧标签页容器
-    private JTextArea outputArea;            // 输出页：显示 OCR 文本
-    private JButton exportBtn;               // 输出页：导出按钮
 
-    public MainUI() {//UI布局
-        settings = new Settings();
-        langMgr = new LanguageManager(settings.getUiLocale());
-        ocrService = new OCRService("tessdata");
+    // 设置页面中的下拉框组件
+    private JComboBox<ComboItem> uiLangCombo;      // 用户界面语言选择框
+    private JComboBox<String> ocrLangCombo;        // OCR 识别语言选择框
+    private JComboBox<String> ocrEngineCombo;      // OCR 引擎选择框
 
-        initFrame();
-        initPreviewPanel();
-        initTabbedPane();
-        initDragAndDrop();
+    // 对应的标签组件
+    private JLabel uiLangLabel;
+    private JLabel ocrLangLabel;
+    private JLabel ocrEngineLabel;
+
+    // 主界面区域组件
+    private JTabbedPane tabbedPane;                // 右侧标签页容器
+    private JPanel settingsPanel;                  // 设置选项卡页面
+    private JPanel outputPanel;                    // 输出结果选项卡页面
+    private JPanel previewPanel;                   // 左侧图像拖拽与预览区
+    private JLabel imageLabel;                     // 图像显示区域
+    private JTextArea outputTextArea;              // 显示 OCR 输出文本的文本框
+
+    private Settings settings;                     // 全局设置对象
+
+    /**
+     * 构造方法，初始化 UI。
+     * @param settings 设置数据对象（保存语言等偏好）
+     */
+    public MainUI(Settings settings) {
+        this.settings = settings;
+        initUI();
+    }
+
+    /**
+     * 初始化主界面结构与组件。
+     */
+    private void initUI() {
+        setTitle(LanguageManager.get("app.title"));
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setSize(1000, 600);
+        setLocationRelativeTo(null);
+        setLayout(new GridLayout(1, 2)); // 左右平分两栏
+
+        buildPreviewPanel();             // 图像拖拽与预览
+        tabbedPane = new JTabbedPane();  // 设置与输出标签页
+        buildOutputTab();
+        buildSettingsTab();
+        updateUIText();                 // 加载初始语言文字
+
+        add(previewPanel);
+        add(tabbedPane);
 
         setVisible(true);
     }
 
-    private void initFrame() {
-        setTitle(langMgr.get("app.title"));
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
-        setSize(1000, 700);
-        setLocationRelativeTo(null);
-        setLayout(new BorderLayout());
-    }
-
-    private void initPreviewPanel() {
+    /**
+     * 构建左侧图像预览区域，支持图像拖入后识别。
+     */
+    private void buildPreviewPanel() {
         previewPanel = new JPanel(new BorderLayout());
-        previewPanel.setBorder(new TitledBorder(langMgr.get("label.preview")));
-        previewLabel = new JLabel(langMgr.get("label.dragHere"), SwingConstants.CENTER);
-        previewPanel.add(previewLabel, BorderLayout.CENTER);
-        add(previewPanel, BorderLayout.WEST);
-    }
+        previewPanel.setBorder(BorderFactory.createTitledBorder(LanguageManager.get("label.preview")));
 
-    private void initTabbedPane() {
-        tabPane = new JTabbedPane();
-        tabPane.addTab(langMgr.get("tab.settings"), buildSettingsTab());
-        tabPane.addTab(langMgr.get("tab.output"), buildOutputTab());
-        add(tabPane, BorderLayout.CENTER);
-    }
+        imageLabel = new JLabel("", SwingConstants.CENTER);
+        previewPanel.add(new JScrollPane(imageLabel), BorderLayout.CENTER);
 
-    private JPanel buildSettingsTab() {
-        JPanel p = new JPanel(new GridBagLayout());
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(8,8,8,8);
-        gbc.anchor = GridBagConstraints.WEST;
-
-        // UI 语言
-        gbc.gridx = 0; gbc.gridy = 0;
-        lblUILang = new JLabel(langMgr.get("label.uiLang"));
-        p.add(lblUILang, gbc);
-        gbc.gridx = 1;
-        uiLangCombo = new JComboBox<>(new String[]{"简体中文","English"});
-        uiLangCombo.setSelectedItem(settings.getUiLocale().equals("zh") ? "简体中文" : "English");
-        uiLangCombo.addItemListener(this::onUILangChanged);
-        p.add(uiLangCombo, gbc);
-
-        // OCR 语言
-        gbc.gridx = 0; gbc.gridy++;
-        lblOCRLang = new JLabel(langMgr.get("label.ocrLang"));
-        p.add(lblOCRLang, gbc);
-        gbc.gridx = 1;
-        ocrLangCombo = new JComboBox<>(new String[]{"eng","chi_sim"});
-        ocrLangCombo.setSelectedItem(settings.getOcrLang());
-        ocrLangCombo.addItemListener(e -> {
-            if (e.getStateChange()==ItemEvent.SELECTED)
-                settings.setOcrLang((String)ocrLangCombo.getSelectedItem());
-        });
-        p.add(ocrLangCombo, gbc);
-
-        // OCR 引擎
-        gbc.gridx = 0; gbc.gridy++;
-        lblOCREngine = new JLabel(langMgr.get("label.ocrEngine"));
-        p.add(lblOCREngine, gbc);
-        gbc.gridx = 1;
-        engineCombo = new JComboBox<>(new String[]{"Tesseract"});
-        engineCombo.setSelectedItem(settings.getOcrEngine());
-        engineCombo.addItemListener(e -> {
-            if (e.getStateChange()==ItemEvent.SELECTED)
-                settings.setOcrEngine((String)engineCombo.getSelectedItem());
-        });
-        p.add(engineCombo, gbc);
-
-        return p;
-    }
-
-    private JPanel buildOutputTab() {
-        JPanel p = new JPanel(new BorderLayout());
-        outputArea = new JTextArea();
-        outputArea.setEditable(false);
-        p.add(new JScrollPane(outputArea), BorderLayout.CENTER);
-        exportBtn = new JButton(langMgr.get("button.exportTxt"));
-        exportBtn.addActionListener(this::onExport);
-        p.add(exportBtn, BorderLayout.SOUTH);
-        return p;
-    }
-
-    private void initDragAndDrop() {
-        new DropTarget(previewPanel, DnDConstants.ACTION_COPY,
-            new DropTargetAdapter() {
-            @SuppressWarnings("unchecked")
+        // 支持用户将图像文件拖入该面板
+        new DropTarget(previewPanel, new DropTargetAdapter() {
+            @Override
             public void drop(DropTargetDropEvent dtde) {
                 try {
                     dtde.acceptDrop(DnDConstants.ACTION_COPY);
-                    List<File> files = (List<File>)dtde.getTransferable().getTransferData(
-                            DataFlavor.javaFileListFlavor);
-                    if (!files.isEmpty()) {
-                        File img = files.get(0);
-                        showPreview(img);
-                        startOCR(img);
+                    java.util.List<File> droppedFiles = (java.util.List<File>) dtde.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
+                    if (!droppedFiles.isEmpty()) {
+                        File imageFile = droppedFiles.get(0);
+                        BufferedImage img = ImageIO.read(imageFile);
+                        if (img != null) {
+                            // 图像等比缩放以适应预览区域
+                            int maxW = previewPanel.getWidth() - 40;
+                            int maxH = previewPanel.getHeight() - 60;
+                            double scale = Math.min((double) maxW / img.getWidth(), (double) maxH / img.getHeight());
+                            int scaledW = (int) (img.getWidth() * scale);
+                            int scaledH = (int) (img.getHeight() * scale);
+                            Image scaled = img.getScaledInstance(scaledW, scaledH, Image.SCALE_SMOOTH);
+                            imageLabel.setIcon(new ImageIcon(scaled));
+
+                            // OCR 识别并输出结果到文本区
+                            Tesseract tesseract = new Tesseract();
+                            tesseract.setDatapath("tessdata");
+                            tesseract.setLanguage("eng"); // 默认识别语言
+                            String result = tesseract.doOCR(imageFile);
+                            outputTextArea.setText(result);
+                            tabbedPane.setSelectedIndex(0); // 自动跳转到输出页
+                        } else {
+                            JOptionPane.showMessageDialog(MainUI.this, LanguageManager.get("error.unsupportedFormat"));
+                        }
                     }
+                } catch (TesseractException ex) {
+                    outputTextArea.setText(LanguageManager.get("error.ocr") + ex.getMessage());
                 } catch (Exception ex) {
-                    showError(ex);
+                    ex.printStackTrace();
                 }
             }
-        }, true);
+        });
     }
 
-    private void showPreview(File imgFile) throws IOException {
-        BufferedImage img = ImageIO.read(imgFile);
-        int w = previewPanel.getWidth() - 20;
-        int h = (int)(img.getHeight() * (w / (double)img.getWidth()));
-        ImageIcon icon = new ImageIcon(img.getScaledInstance(w,h,Image.SCALE_SMOOTH));
-        previewLabel.setText("");
-        previewLabel.setIcon(icon);
+    /**
+     * 构建输出结果页，显示 OCR 识别文本。
+     */
+    private void buildOutputTab() {
+        outputPanel = new JPanel(new BorderLayout());
+        outputTextArea = new JTextArea();
+        outputTextArea.setLineWrap(true);
+        outputTextArea.setWrapStyleWord(true);
+        outputTextArea.setEditable(false);
+        outputPanel.add(new JScrollPane(outputTextArea), BorderLayout.CENTER);
+        tabbedPane.addTab("", outputPanel);
     }
 
-    private void startOCR(File imgFile) {
-        outputArea.setText(langMgr.get("status.processing"));
-        new Thread(() -> {
-            try {
-                String text = ocrService.doOCR(imgFile, settings.getOcrLang());
-                SwingUtilities.invokeLater(() -> {
-                    outputArea.setText(text);
-                    tabPane.setSelectedIndex(1);
-                });
-            } catch (TesseractException ex) {
-                showError(ex);
+    /**
+     * 构建设置页，用户选择界面语言、OCR语言与引擎。
+     */
+    private void buildSettingsTab() {
+        settingsPanel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(8, 8, 8, 8);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+
+        // UI语言标签与选择框
+        uiLangLabel = new JLabel();
+        settingsPanel.add(uiLangLabel, gbc);
+        gbc.gridx = 1;
+        uiLangCombo = new JComboBox<>();
+        uiLangCombo.addItem(new ComboItem("English", "en"));
+        uiLangCombo.addItem(new ComboItem("简体中文", "zh_CN"));
+        uiLangCombo.addItem(new ComboItem("繁體中文", "zh_TW"));
+        uiLangCombo.setPreferredSize(new Dimension(140, 24));
+        uiLangCombo.addItemListener(e -> {
+            if (e.getStateChange() == ItemEvent.SELECTED) {
+                onUILangChanged();
             }
-        }).start();
+        });
+        settingsPanel.add(uiLangCombo, gbc);
+
+        // OCR语言标签与下拉框
+        gbc.gridx = 0;
+        gbc.gridy++;
+        ocrLangLabel = new JLabel();
+        settingsPanel.add(ocrLangLabel, gbc);
+        gbc.gridx = 1;
+        ocrLangCombo = new JComboBox<>();
+        ocrLangCombo.setPreferredSize(new Dimension(140, 24));
+        settingsPanel.add(ocrLangCombo, gbc);
+
+        // OCR引擎标签与下拉框
+        gbc.gridx = 0;
+        gbc.gridy++;
+        ocrEngineLabel = new JLabel();
+        settingsPanel.add(ocrEngineLabel, gbc);
+        gbc.gridx = 1;
+        ocrEngineCombo = new JComboBox<>();
+        ocrEngineCombo.setPreferredSize(new Dimension(140, 24));
+        settingsPanel.add(ocrEngineCombo, gbc);
+
+        tabbedPane.addTab("", settingsPanel);
     }
 
-    private void onUILangChanged(ItemEvent e) {//界面语言，下拉选项
-        if (e.getStateChange()!=ItemEvent.SELECTED) return;
-        String sel = (String)uiLangCombo.getSelectedItem();
-        settings.setUiLocale("简体中文".equals(sel) ? "zh" : "en");
-        langMgr.switchLocale(settings.getUiLocale());
-        updateUIText();
-    }
+    /**
+     * 刷新界面中所有受语言影响的文本内容。
+     */
+    private void updateUIText() {
+        setTitle(LanguageManager.get("app.title"));
 
-    private void onExport(ActionEvent ev) {//以TXT文件格式，导出OCR文本
-        JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle(langMgr.get("fileChooser.saveTitle"));
-        chooser.setSelectedFile(new File("ocr_result.txt"));
-        if (chooser.showSaveDialog(this)==JFileChooser.APPROVE_OPTION) {
-            try (Writer w = new BufferedWriter(new FileWriter(chooser.getSelectedFile()))) {
-                w.write(outputArea.getText());
-            } catch (IOException ex) {
-                showError(ex);
-            }
+        uiLangLabel.setText(LanguageManager.get("label.uiLang"));
+        ocrLangLabel.setText(LanguageManager.get("label.ocrLang"));
+        ocrEngineLabel.setText(LanguageManager.get("label.ocrEngine"));
+
+        tabbedPane.setTitleAt(1, LanguageManager.get("tab.settings"));
+        tabbedPane.setTitleAt(0, LanguageManager.get("tab.output"));
+
+        ocrLangCombo.removeAllItems();
+        ocrLangCombo.addItem(LanguageManager.get("ocrLang.eng"));
+        ocrLangCombo.addItem(LanguageManager.get("ocrLang.chi_sim"));
+        ocrLangCombo.addItem(LanguageManager.get("ocrLang.chi_tra"));
+
+        ocrEngineCombo.removeAllItems();
+        ocrEngineCombo.addItem("Tesseract");
+
+        if (previewPanel != null && previewPanel.getBorder() instanceof javax.swing.border.TitledBorder) {
+            ((javax.swing.border.TitledBorder) previewPanel.getBorder()).setTitle(LanguageManager.get("label.preview"));
+            previewPanel.repaint();
         }
     }
 
-    private void updateUIText() {//界面语言切换
-        setTitle(langMgr.get("app.title"));
-        ((TitledBorder)previewPanel.getBorder()).setTitle(langMgr.get("label.preview"));
-        previewLabel.setText(langMgr.get("label.dragHere"));
-        tabPane.setTitleAt(0, langMgr.get("tab.settings"));
-        tabPane.setTitleAt(1, langMgr.get("tab.output"));
-        lblUILang.setText(langMgr.get("label.uiLang"));
-        lblOCRLang.setText(langMgr.get("label.ocrLang"));
-        lblOCREngine.setText(langMgr.get("label.ocrEngine"));
-        exportBtn.setText(langMgr.get("button.exportTxt"));
-        SwingUtilities.updateComponentTreeUI(this);
+    /**
+     * 语言下拉框变更事件，更新系统语言并刷新界面。
+     */
+    private void onUILangChanged() {
+        ComboItem selected = (ComboItem) uiLangCombo.getSelectedItem();
+        if (selected == null) return;
+        String langCode = selected.getValue();
+        Locale locale;
+        switch (langCode) {
+            case "zh_CN": locale = Locale.SIMPLIFIED_CHINESE; break;
+            case "zh_TW": locale = Locale.TRADITIONAL_CHINESE; break;
+            default: locale = Locale.ENGLISH;
+        }
+        settings.setUiLocale(langCode);
+        LanguageManager.setLocale(locale);
+        updateUIText();
     }
 
-    private void showError(Exception ex) {//错误提示
-        ex.printStackTrace();
-        SwingUtilities.invokeLater(() ->
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "错误", JOptionPane.ERROR_MESSAGE));
-    }
+    /**
+     * 通用下拉框封装类（显示名称 + 值）
+     */
+    static class ComboItem {
+        private String label;
+        private String value;
 
-    public static void main(String[] args) {//主函数，启动SwingUI
-        SwingUtilities.invokeLater(MainUI::new);
+        public ComboItem(String label, String value) {
+            this.label = label;
+            this.value = value;
+        }
+
+        public String toString() {
+            return label;
+        }
+
+        public String getValue() {
+            return value;
+        }
     }
 }

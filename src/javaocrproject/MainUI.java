@@ -20,7 +20,7 @@ public class MainUI extends JFrame {
 
     // 设置页面中的下拉框组件
     private JComboBox<ComboItem> uiLangCombo;      // 用户界面语言选择框
-    private JComboBox<String> ocrLangCombo;        // OCR 识别语言选择框
+    private JComboBox<ComboItem> ocrLangCombo;        // OCR 识别语言选择框
     private JComboBox<String> ocrEngineCombo;      // OCR 引擎选择框
 
     // 对应的标签组件
@@ -35,21 +35,21 @@ public class MainUI extends JFrame {
     private JPanel previewPanel;                   // 左侧图像拖拽与预览区
     private JLabel imageLabel;                     // 图像显示区域
     private JTextArea outputTextArea;              // 显示 OCR 输出文本的文本框
-
+    private JTextArea historyTextArea;             // 显示 OCR 历史记录的文本框
+    
     private Settings settings;                     // 全局设置对象
-
+    private OCRHistoryManager historyManager;      //OCR历史记录管理器
     /**
      * 构造方法，初始化 UI。
      * @param settings 设置数据对象（保存语言等偏好）
      */
     public MainUI(Settings settings) {
         this.settings = settings;
+        this.historyManager = new OCRHistoryManager();
         initUI();
     }
 
-    /**
-     * 初始化主界面结构与组件。
-     */
+    //初始化主界面结构与组件。
     private void initUI() {
         setTitle(LanguageManager.get("app.title"));
         setDefaultCloseOperation(EXIT_ON_CLOSE);
@@ -61,17 +61,17 @@ public class MainUI extends JFrame {
         tabbedPane = new JTabbedPane();  // 设置与输出标签页
         buildOutputTab();
         buildSettingsTab();
+        buildHistoryTab();              //构建历史记录标签页
         updateUIText();                 // 加载初始语言文字
-
+        updateHistoryDisplay();         // 新增：初始化历史记录显示
+        
         add(previewPanel);
         add(tabbedPane);
 
         setVisible(true);
     }
 
-    /**
-     * 构建左侧图像预览区域，支持图像拖入后识别。
-     */
+    //构建左侧图像预览区域，支持图像拖入后识别。
     private void buildPreviewPanel() {
         previewPanel = new JPanel(new BorderLayout());
         previewPanel.setBorder(BorderFactory.createTitledBorder(LanguageManager.get("label.preview")));
@@ -102,10 +102,12 @@ public class MainUI extends JFrame {
                             // OCR 识别并输出结果到文本区
                             Tesseract tesseract = new Tesseract();
                             tesseract.setDatapath("tessdata");
-                            tesseract.setLanguage("eng"); // 默认识别语言
+                            tesseract.setLanguage(settings.getOcrLang()); // 识别OCR语言
                             String result = tesseract.doOCR(imageFile);
                             outputTextArea.setText(result);
                             tabbedPane.setSelectedIndex(0); // 自动跳转到输出页
+                            historyManager.addRecord(result);// 将 OCR 结果添加到历史记录管理器中
+                            updateHistoryDisplay();//OCR 后刷新历史记录显示
                         } else {
                             JOptionPane.showMessageDialog(MainUI.this, LanguageManager.get("error.unsupportedFormat"));
                         }
@@ -119,9 +121,7 @@ public class MainUI extends JFrame {
         });
     }
 
-    /**
-     * 构建输出结果页，显示 OCR 识别文本。
-     */
+    //构建输出结果页，显示 OCR 识别文本。
     private void buildOutputTab() {
         outputPanel = new JPanel(new BorderLayout());
         outputTextArea = new JTextArea();
@@ -132,9 +132,7 @@ public class MainUI extends JFrame {
         tabbedPane.addTab("", outputPanel);
     }
 
-    /**
-     * 构建设置页，用户选择界面语言、OCR语言与引擎。
-     */
+    //构建设置页，用户选择界面语言、OCR语言与引擎。
     private void buildSettingsTab() {
         settingsPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -167,6 +165,17 @@ public class MainUI extends JFrame {
         gbc.gridx = 1;
         ocrLangCombo = new JComboBox<>();
         ocrLangCombo.setPreferredSize(new Dimension(140, 24));
+        ocrLangCombo.addItemListener(e -> {
+            if (e.getStateChange() == ItemEvent.SELECTED) {
+                // 获取 ComboItem 对象
+                ComboItem selected = (ComboItem) ocrLangCombo.getSelectedItem();
+                if (selected != null) {
+                    // 使用 ComboItem 的 getValue() 获取 Tesseract 对应的语言代码
+                    settings.setOcrLang(selected.getValue());
+                    // System.out.println("OCR Language changed to: " + settings.getOcrLang()); // 调试信息
+                }
+            }
+        });
         settingsPanel.add(ocrLangCombo, gbc);
 
         // OCR引擎标签与下拉框
@@ -182,9 +191,46 @@ public class MainUI extends JFrame {
         tabbedPane.addTab("", settingsPanel);
     }
 
-    /**
-     * 刷新界面中所有受语言影响的文本内容。
-     */
+    private void buildHistoryTab() {
+        JPanel historyPanel = new JPanel(new BorderLayout());
+        historyTextArea = new JTextArea();
+        historyTextArea.setLineWrap(true);
+        historyTextArea.setWrapStyleWord(true);
+        historyTextArea.setEditable(false); // 历史记录不应该被编辑
+        historyPanel.add(new JScrollPane(historyTextArea), BorderLayout.CENTER);
+
+        // 一个按钮,清空历史记录
+        JButton clearHistoryButton = new JButton(LanguageManager.get("button.clearHistory")); // 我们稍后会在properties文件里添加这个key
+        clearHistoryButton.addActionListener(e -> {
+            historyManager.clearHistory(); // 调用历史管理器清空记录
+            updateHistoryDisplay(); // 刷新显示
+            JOptionPane.showMessageDialog(MainUI.this, LanguageManager.get("status.historyCleared")); // 提示用户
+        });
+
+        JPanel buttonPanel = new JPanel();
+        buttonPanel.add(clearHistoryButton);
+        historyPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+        tabbedPane.addTab("", historyPanel); // 暂时设置空标题，将在updateUIText中更新
+    }
+    
+    // 刷新历史记录文本区域的显示
+    private void updateHistoryDisplay() {
+        StringBuilder sb = new StringBuilder();
+        java.util.List<String> records = historyManager.getAllRecords(); // 获取所有历史记录 
+        if (records.isEmpty()) {
+            sb.append(LanguageManager.get("status.noHistory")); // 稍后在properties文件里添加这个key
+        } else {
+            for (int i = 0; i < records.size(); i++) { // 遍历历史记录列表 
+                sb.append("--- Record ").append(i + 1).append(" ---\n");
+                sb.append(records.get(i)).append("\n\n");
+            }
+        }
+        historyTextArea.setText(sb.toString());
+        historyTextArea.setCaretPosition(0); // 滚动到顶部
+    }
+    
+    //刷新界面中所有受语言影响的文本内容。
     private void updateUIText() {
         setTitle(LanguageManager.get("app.title"));
 
@@ -192,13 +238,14 @@ public class MainUI extends JFrame {
         ocrLangLabel.setText(LanguageManager.get("label.ocrLang"));
         ocrEngineLabel.setText(LanguageManager.get("label.ocrEngine"));
 
-        tabbedPane.setTitleAt(1, LanguageManager.get("tab.settings"));
         tabbedPane.setTitleAt(0, LanguageManager.get("tab.output"));
+        tabbedPane.setTitleAt(1, LanguageManager.get("tab.settings"));
+        tabbedPane.setTitleAt(2, LanguageManager.get("tab.history")); // 历史记录标签页标题
 
         ocrLangCombo.removeAllItems();
-        ocrLangCombo.addItem(LanguageManager.get("ocrLang.eng"));
-        ocrLangCombo.addItem(LanguageManager.get("ocrLang.chi_sim"));
-        ocrLangCombo.addItem(LanguageManager.get("ocrLang.chi_tra"));
+        ocrLangCombo.addItem(new ComboItem(LanguageManager.get("ocrLang.eng"), "eng"));
+        ocrLangCombo.addItem(new ComboItem(LanguageManager.get("ocrLang.chi_sim"), "chi_sim"));
+        ocrLangCombo.addItem(new ComboItem(LanguageManager.get("ocrLang.chi_tra"), "chi_tra"));
 
         ocrEngineCombo.removeAllItems();
         ocrEngineCombo.addItem("Tesseract");
@@ -206,12 +253,20 @@ public class MainUI extends JFrame {
         if (previewPanel != null && previewPanel.getBorder() instanceof javax.swing.border.TitledBorder) {
             ((javax.swing.border.TitledBorder) previewPanel.getBorder()).setTitle(LanguageManager.get("label.preview"));
             previewPanel.repaint();
+            
+        // ***** 新增：确保 OCR 语言下拉框选中当前设置的语言 *****
+        String currentOcrLang = settings.getOcrLang();
+        for (int i = 0; i < ocrLangCombo.getItemCount(); i++) {
+            ComboItem item = ocrLangCombo.getItemAt(i);
+            if (item.getValue().equals(currentOcrLang)) {
+                ocrLangCombo.setSelectedItem(item);
+                break;
+            }
+        }
         }
     }
 
-    /**
-     * 语言下拉框变更事件，更新系统语言并刷新界面。
-     */
+    //语言下拉框变更事件，更新系统语言并刷新界面。
     private void onUILangChanged() {
         ComboItem selected = (ComboItem) uiLangCombo.getSelectedItem();
         if (selected == null) return;
@@ -227,12 +282,10 @@ public class MainUI extends JFrame {
         updateUIText();
     }
 
-    /**
-     * 通用下拉框封装类（显示名称 + 值）
-     */
+    //通用下拉框封装类（显示名称 + 值）
     static class ComboItem {
-        private String label;
-        private String value;
+        private final String label;
+        private final String value;
 
         public ComboItem(String label, String value) {
             this.label = label;
@@ -245,6 +298,19 @@ public class MainUI extends JFrame {
 
         public String getValue() {
             return value;
+        }
+        
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            ComboItem item = (ComboItem) obj;
+            return value != null ? value.equals(item.value) : item.value == null;
+        }
+
+        @Override
+        public int hashCode() {
+            return value != null ? value.hashCode() : 0;
         }
     }
 }

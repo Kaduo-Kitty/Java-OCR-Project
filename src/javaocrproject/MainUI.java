@@ -321,11 +321,11 @@ public class MainUI extends JFrame {
         if (selected == null) return;
         String langCode = selected.getValue();
         Locale locale;
-        switch (langCode) {
-            case "zh_CN": locale = Locale.SIMPLIFIED_CHINESE; break;
-            case "zh_TW": locale = Locale.TRADITIONAL_CHINESE; break;
-            default: locale = Locale.ENGLISH;
-        }
+        locale = switch (langCode) {
+            case "zh_CN" -> Locale.SIMPLIFIED_CHINESE;
+            case "zh_TW" -> Locale.TRADITIONAL_CHINESE;
+            default -> Locale.ENGLISH;
+        };
         settings.setUiLocale(langCode);
         LanguageManager.setLocale(locale);
         updateUIText();
